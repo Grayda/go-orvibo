@@ -22,6 +22,7 @@ type EventStruct struct {
 
 // Device is info about the type of device that's been detected (socket, allone etc.)
 type Device struct {
+	ID                int          // The ID of our socket
 	Name              string       // The name of our item
 	Type              int          // What type of device this is. See the const below for valid types
 	IP                *net.UDPAddr // The IP address of our item
@@ -32,6 +33,7 @@ type Device struct {
 	LastIRMessage     string       // The last IR message to come in, if our device is an AllOne. It's always blank, otherwise
 	Last433mhzMessage string       // Not yet implemented.
 	LastMessage       string       // The last message to come through for this device
+
 }
 
 const (
@@ -45,8 +47,9 @@ const (
 var conn *net.UDPConn // UDP Connection
 
 var Events = make(chan EventStruct, 1) // Events is our events channel which will notify calling code that we have an event happening
-var devices = make(map[string]*Device) // All the devices we've discovered
+var Devices = make(map[string]*Device) // All the Devices we've discovered
 var twenties = "202020202020"          // This is padding for the MAC Address. It appears often, so we define it here for brevity
+var deviceCount int                    // How many items we've discovered
 // Our UDP connection
 
 // ===============
@@ -55,6 +58,7 @@ var twenties = "202020202020"          // This is padding for the MAC Address. I
 
 // Prepare is the first function you should call. Gets our UDP connection ready
 func Prepare() (bool, error) {
+
 	_, err := getLocalIP() // Get our local IP. Not actually used in this func, but is more of a failsafe
 	if err != nil {        // Error? Return false
 		return false, err
@@ -85,12 +89,12 @@ func Discover() {
 
 }
 
-// Subscribe loops over all the devices we know about, and asks for control (subscription)
+// Subscribe loops over all the Devices we know about, and asks for control (subscription)
 func Subscribe() {
-	for k := range devices { // Loop over all sockets we know about
-		if devices[k].Subscribed == false { // If we haven't subscribed.
+	for k := range Devices { // Loop over all sockets we know about
+		if Devices[k].Subscribed == false { // If we haven't subscribed.
 			// We send a message to each socket. reverseMAC takes a MAC address and reverses each pair (e.g. AC CF 23 becomes CA FC 32)
-			sendMessage("6864001e636c"+devices[k].MACAddress+twenties+reverseMAC(devices[k].MACAddress)+twenties, devices[k].IP)
+			sendMessage("6864001e636c"+Devices[k].MACAddress+twenties+reverseMAC(Devices[k].MACAddress)+twenties, Devices[k].IP)
 		}
 	}
 	// FIXME: success will be the last socket subscribed. If all fail but this one, will return true. If all succeed except last one, will return false
@@ -102,18 +106,20 @@ func Query() (bool, error) {
 	var success bool
 	var err error
 
-	for k := range devices { // Loop over all sockets we know about
-		if devices[k].Queried == false && devices[k].Subscribed == true { // If we've subscribed but not queried..
-			success, err = sendMessage("6864001D7274"+devices[k].MACAddress+twenties+"0000000004000000000000", devices[k].IP)
+	for k := range Devices { // Loop over all sockets we know about
+		if Devices[k].Queried == false && Devices[k].Subscribed == true { // If we've subscribed but not queried..
+			success, err = sendMessage("6864001D7274"+Devices[k].MACAddress+twenties+"0000000004000000000000", Devices[k].IP)
+		} else {
+			fmt.Println("Queried:", Devices[k].Queried, "Subscribed:", Devices[k].Subscribed)
 		}
 	}
 
 	return success, err
 }
 
-// ListDevices spews out info about all the devices we know about. It's great because it includes counts and other stuff
+// ListDevices spews out info about all the Devices we know about. It's great because it includes counts and other stuff
 func ListDevices() {
-	spew.Dump(&devices)
+	spew.Dump(&Devices)
 }
 
 // CheckForMessages does what it says on the tin -- checks for incoming UDP messages
@@ -142,7 +148,7 @@ func CheckForMessages() (bool, error) { // Now we're checking for messages
 
 // ToggleState finds out if the socket is on or off, then toggles it
 func ToggleState(macAdd string) (bool, error) {
-	if devices[macAdd].State == true {
+	if Devices[macAdd].State == true {
 		return SetState(macAdd, false)
 	}
 
@@ -152,8 +158,8 @@ func ToggleState(macAdd string) (bool, error) {
 
 // SetState sets the state of a socket, given its MAC address
 func SetState(macAdd string, state bool) (bool, error) {
-	if devices[macAdd].Type == SOCKET { // If it's a socket
-		devices[macAdd].State = state
+	if Devices[macAdd].Type == SOCKET { // If it's a socket
+		Devices[macAdd].State = state
 		var statebit string
 		if state == true {
 			statebit = "01"
@@ -161,8 +167,8 @@ func SetState(macAdd string, state bool) (bool, error) {
 			statebit = "00"
 		}
 
-		success, err := sendMessage("686400176463"+macAdd+twenties+"00000000"+statebit, devices[macAdd].IP)
-		passMessage("stateset", *devices[macAdd])
+		success, err := sendMessage("686400176463"+macAdd+twenties+"00000000"+statebit, Devices[macAdd].IP)
+		passMessage("stateset", *Devices[macAdd])
 		return success, err
 	}
 	return false, errors.New("Can't set state on a non-socket") // Naughty us, trying to set state on an AllOne!
@@ -175,7 +181,7 @@ func SetState(macAdd string, state bool) (bool, error) {
 
 // handleMessage parses a message found by CheckForMessages
 func handleMessage(message string, addr *net.UDPAddr) (bool, error) {
-	fmt.Println("Message from", addr.IP)
+
 	if len(message) == 0 { // Blank message? Don't try and parse it!
 		return false, errors.New("Blank message")
 	}
@@ -184,40 +190,56 @@ func handleMessage(message string, addr *net.UDPAddr) (bool, error) {
 		return true, nil
 	}
 	commandID := message[8:12] // What command we've received back
-
+	fmt.Println("Message from", addr.IP, "CID is", commandID)
 	macStart := strings.Index(message, "accf")  // Find where our MAC Address starts
 	macAdd := message[macStart:(macStart + 12)] // The MAC address of the socket responding
 
 	switch commandID {
 	case "7161": // We've had a response to our broadcast message
 
-		_, ok := devices[macAdd] // Check to see if we've already got macAdd in our array
+		_, ok := Devices[macAdd] // Check to see if we've already got macAdd in our array
 
 		if strings.Index(message, "4952443030") > 0 { // Contains SOC00? It's a socket!
-			if ok == false { // We haven't got it in our devices array?
-				devices[macAdd] = &Device{"", ALLONE, addr, macAdd, false, false, false, "", "", ""} // Add the device
-				passMessage("allonefound", *devices[macAdd])                                         // Let our calling code know
+			if ok == false { // We haven't got it in our Devices array?
+				deviceCount++
+				Devices[macAdd] = &Device{deviceCount, "", ALLONE, addr, macAdd, false, false, false, "", "", ""} // Add the device
+				passMessage("allonefound", *Devices[macAdd])                                                      // Let our calling code know
 			} else {
-				passMessage("existingallonefound", *devices[macAdd])
+				passMessage("existingallonefound", *Devices[macAdd])
 			}
 
 		} else if strings.Index(message, "534f433030") > 0 { // Contains IRD00? It's an IR blaster!
 			if ok == false {
-				devices[macAdd] = &Device{"", SOCKET, addr, macAdd, false, false, false, "", "", ""} // Add the device
-				passMessage("socketfound", *devices[macAdd])
+				deviceCount++
+				Devices[macAdd] = &Device{deviceCount, "", SOCKET, addr, macAdd, false, false, false, "", "", ""} // Add the device
+				lastBit := message[(len(message) - 1):]                                                           // Get the last bit from our message. 0 or 1 for off or on
+				if lastBit == "0" {
+					Devices[macAdd].State = false
+				} else {
+					Devices[macAdd].State = true
+				}
+
+				passMessage("socketfound", *Devices[macAdd])
 			} else {
-				passMessage("existingsocketfound", *devices[macAdd])
+				passMessage("existingsocketfound", *Devices[macAdd])
 			}
 		} else {
-			passMessage("unknownhardwarefound", *devices[macAdd])
+			passMessage("unknownhardwarefound", *Devices[macAdd])
 		}
 
 	case "636c": // We've had confirmation of subscription
-		devices[macAdd].Subscribed = true
-		ListDevices()
-		passMessage("subscribed", *devices[macAdd])
+
+		lastBit := message[(len(message) - 1):] // Get the last bit from our message. 0 or 1 for off or on
+		if lastBit == "0" {
+			Devices[macAdd].State = false
+		} else {
+			Devices[macAdd].State = true
+		}
+
+		passMessage("subscribed", *Devices[macAdd])
 
 	case "7274": // We've queried our socket, this is the data back
+
 		// Our name starts after the fourth 202020202020, or 140 bytes in
 		strName := message[140:172]
 		strName = strings.TrimRight(strName, "") // Get rid of the spaces at the end
@@ -228,28 +250,28 @@ func handleMessage(message string, addr *net.UDPAddr) (bool, error) {
 		// If no name has been set, we get 32 bytes of F back, so
 		// we create a generic name so our socket name won't be spaces
 		if strName == "20202020202020202020202020202020" {
-			devices[macAdd].Name = "Socket " + macAdd
+			Devices[macAdd].Name = "Socket " + macAdd
 		} else { // If a name WAS set
-			devices[macAdd].Name = string(strDecName) // Convert back to text and assign
+			Devices[macAdd].Name = string(strDecName) // Convert back to text and assign
 		}
 
-		passMessage("queried", *devices[macAdd])
+		passMessage("queried", *Devices[macAdd])
 
 	case "7366": // Confirmation of state change
 
 		lastBit := message[(len(message) - 1):] // Get the last bit from our message. 0 or 1 for off or on
 		if lastBit == "0" {
-			devices[macAdd].State = false
+			Devices[macAdd].State = false
 		} else {
-			devices[macAdd].State = true
+			Devices[macAdd].State = true
 		}
 
-		passMessage("statechanged", *devices[macAdd])
+		passMessage("statechanged", *Devices[macAdd])
 
 	default: // No message? Return true
 		return true, nil
 	}
-	devices[macAdd].LastMessage = message // Set our LastMessage
+	Devices[macAdd].LastMessage = message // Set our LastMessage
 	return true, nil
 }
 
@@ -300,6 +322,7 @@ func passMessage(message string, device Device) bool {
 
 // sendMessage is the heart of our library. Sends UDP messages to specified IP addresses
 func sendMessage(msg string, ip *net.UDPAddr) (bool, error) {
+
 	// Turn this hex string into bytes for sending
 	buf, _ := hex.DecodeString(msg)
 

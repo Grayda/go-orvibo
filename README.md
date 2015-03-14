@@ -8,6 +8,8 @@ Usage
 
 See `tests/main.go` for a full example
 
+To run the test, simply run `go run main.go` from the directory.
+
 To Do
 =====
 
@@ -15,6 +17,7 @@ To Do
  - [ ] Add in set up feature as per https://stikonas.eu/gitweb/?p=s20.git;a=summary
  - [ ] Add in support for 433mhz with the AllOne
  - [ ] Support for Kepler and RF switches
+ - [ ] Code cleanup
 
 Contributing
 ============
