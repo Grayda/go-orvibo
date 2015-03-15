@@ -92,10 +92,10 @@ func Discover() {
 // Subscribe loops over all the Devices we know about, and asks for control (subscription)
 func Subscribe() {
 	for k := range Devices { // Loop over all sockets we know about
-		if Devices[k].Subscribed == false { // If we haven't subscribed.
-			// We send a message to each socket. reverseMAC takes a MAC address and reverses each pair (e.g. AC CF 23 becomes CA FC 32)
-			sendMessage("6864001e636c"+Devices[k].MACAddress+twenties+reverseMAC(Devices[k].MACAddress)+twenties, Devices[k].IP)
-		}
+		//if Devices[k].Subscribed == false { // If we haven't subscribed.
+		// We send a message to each socket. reverseMAC takes a MAC address and reverses each pair (e.g. AC CF 23 becomes CA FC 32)
+		sendMessage("6864001e636c"+Devices[k].MACAddress+twenties+reverseMAC(Devices[k].MACAddress)+twenties, Devices[k].IP)
+		//}
 	}
 	// FIXME: success will be the last socket subscribed. If all fail but this one, will return true. If all succeed except last one, will return false
 	return
