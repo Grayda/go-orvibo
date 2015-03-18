@@ -249,7 +249,7 @@ func handleMessage(message string, addr *net.UDPAddr) (bool, error) {
 
 		// If no name has been set, we get 32 bytes of F back, so
 		// we create a generic name so our socket name won't be spaces
-		if strName == "20202020202020202020202020202020" {
+		if strName == "20202020202020202020202020202020" || strName == "ffffffffffffffffffffffffffffffff" {
 			Devices[macAdd].Name = "Socket " + macAdd
 		} else { // If a name WAS set
 			Devices[macAdd].Name = string(strDecName) // Convert back to text and assign
