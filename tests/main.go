@@ -3,12 +3,21 @@ package main
 import (
 	"fmt"                         // For outputting messages
 	"github.com/Grayda/go-orvibo" // For controlling Orvibo stuff
-	"time"                        // For setInterval()
+	//	"github.com/davecgh/go-spew/spew" // For neatly outputting stuff
+	"time" // For setInterval()
 )
 
 func main() {
+	// These are our SetIntervals that run. To cancel one, simply send "<- true" to it (e.g. autoDiscover <- true)
+	var autoDiscover, resubscribe chan bool
+
 	ready, err := orvibo.Prepare() // You ready?
 	if ready == true {             // Yep! Let's do this!
+		// Because we'll never reach the end of the for loop (in theory),
+		// we run SendEvent here.
+
+		autoDiscover = setInterval(orvibo.Discover, time.Minute)
+		resubscribe = setInterval(orvibo.Subscribe, time.Minute*3)
 		orvibo.Discover() // Discover all sockets
 
 		for { // Loop forever
@@ -21,16 +30,35 @@ func main() {
 					fmt.Println("Socket found! MAC address is", msg.DeviceInfo.MACAddress)
 					orvibo.Subscribe() // Subscribe to any unsubscribed sockets
 					orvibo.Query()     // And query any unqueried sockets
+				case "allonefound":
+					fmt.Println("AllOne found! MAC address is", msg.DeviceInfo.MACAddress)
+					orvibo.Subscribe() // Subscribe to any unsubscribed sockets
+					orvibo.Query()     // And query any unqueried sockets
+
 				case "subscribed":
+					if msg.DeviceInfo.Subscribed == false {
+
+						fmt.Println("Subscription successful!")
+
+						orvibo.Devices[msg.DeviceInfo.MACAddress].Subscribed = true
+						orvibo.Query()
+						fmt.Println("Query called")
+
+					}
 					orvibo.Query()
-					orvibo.Subscribe()
 				case "queried":
-					fmt.Println("We've queried. Name is:", msg.DeviceInfo.Name)
-					orvibo.SetState(msg.DeviceInfo.MACAddress, true)
-					time.Sleep(time.Second)
-					orvibo.SetState(msg.DeviceInfo.MACAddress, false)
+
+					if msg.DeviceInfo.Queried == false {
+						orvibo.Devices[msg.DeviceInfo.MACAddress].Queried = true
+						fmt.Println("Name of socket is:", msg.DeviceInfo.Name)
+						orvibo.TestRF(msg.DeviceInfo.MACAddress)
+					}
+
 				case "statechanged":
-					fmt.Println("State changed to", msg.DeviceInfo.State)
+					fmt.Println("State changed to:", msg.DeviceInfo.State)
+				case "quit":
+					autoDiscover <- true
+					resubscribe <- true
 				}
 			default:
 				orvibo.CheckForMessages()
@@ -39,6 +67,7 @@ func main() {
 		}
 	} else {
 		fmt.Println("Error:", err)
+
 	}
 
 }

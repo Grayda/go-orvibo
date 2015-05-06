@@ -1,0 +1,23 @@
+cd - 6364 - Countdown
+cl - 636C - Subscription response received (A.K.A TCP Login Command)
+cs - 6373 - Clock synchronization
+dc - 6463 - Socket state change response (known as RfCtrlCmd in APK)
+dc-rf - 64632D7266
+di - 6469 - Button on AllOne pressed
+dn - 646E
+hb - 6862 - "Heartbeet" (periodic ping. Perhaps keeps socket subscribed?)
+ic - 6963 - IR code emitted (IR Control Command)
+ic2 - 696332
+ir - 6972 - "Check IR command" (according to decompiled APK)
+ls - 6C73 - IR code received (send this to enter learning mode)
+ls-cd - 6C732D6364
+lt -      - TCP logout command (for remote access?)
+mp - 6D70 - Modify remote password
+qa - 7161 - Search for socket where MAC unknown
+qg - 7167 - Search for socket where MAC is known
+rt - 7274 - Query response received (A.K.A Read Table command)
+rs -      - Reset command
+sf - 7366 - State change (via socket button press)
+tm - 746D
+ul - 756C
+ur - 7572
