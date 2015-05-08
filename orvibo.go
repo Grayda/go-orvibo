@@ -8,8 +8,9 @@ import (
 	"errors"                          // For crafting our own errors
 	"fmt"                             // For outputting stuff
 	"github.com/davecgh/go-spew/spew" // For neatly outputting stuff
-	//	"math/rand"                       // For the generation of random numbers
-	"net"     // For networking stuff
+	"math/rand"                       // For the generation of random numbers
+	"net"                             // For networking stuff
+	"strconv"
 	"strings" // For string manipulation (indexOf etc.)
 )
 
@@ -19,6 +20,13 @@ import (
 type EventStruct struct {
 	Name       string
 	DeviceInfo Device
+}
+
+// IRCode is a struct that describes our IR code. Name is a short name (e.g. "Power On") and Code is an IR hex string
+type IRCode struct {
+	ID   int
+	Name string
+	Code string
 }
 
 // Device is info about the type of device that's been detected (socket, allone etc.)
@@ -176,33 +184,50 @@ func SetState(macAdd string, state bool) (bool, error) {
 
 }
 
+// EmitIR emits IR from the AllOne. Takes a hex string
 func EmitIR(IR string, macAdd string) {
-	var irlen string = "0020"
-	// this.hex2ba(hosts[index].macaddress), twenties, ['0x65', '0x00', '0x00', '0x00'], randomBitA, randomBitB, this.hex2ba(irLength), this.hex2ba(ir));
-	SendMessage("6864"+irlen+"6963"+macAdd+twenties+"65000000"+"AF00"+"AC44"+"0006"+"D57530", Devices[macAdd].IP)
-}
 
-func TestRF(macAdd string) {
-	fmt.Println("Sending Test")
-	// 6864001e6463accfdeadbeef202020202020800000009a70002c00d8e4b8
-	// 6864001e6463accfdeadbeef2020202020206d0000002cc4002c00d8e4b8
-	// 6864001e6463accfdeadbeef202020202020780000008dbc002a001e859c
+	rnda := fmt.Sprintf("%02s", strconv.FormatInt(int64(rand.Intn(255)), 16)) // Gets a number between 0 and 255, makes it into a hex string, then pads it with zeros
+	rndb := fmt.Sprintf("%02s", strconv.FormatInt(int64(rand.Intn(255)), 16)) // Gets a number between 0 and 255, makes it into a hex string, then pads it with zeros
+	var irlen = fmt.Sprintf("%04s", strconv.FormatInt(int64(len(IR)/2), 16))
+	irlen = irlen[2:4] + irlen[0:2]
+	var packet = "6864" + "0000" + "6963" + "accfdeadbeef" + twenties + "65000000" + rnda + rndb + irlen + IR
+	var packetlen = fmt.Sprintf("%04s", strconv.FormatInt(int64(len(packet)/2), 16))
+	fmt.Println("Packet Length (int):", len(packet), "RndA:", rnda, "RndB:", rndb, "IR Length:", irlen, "Packet Length:", packetlen)
 
+	// 6864 irlen 6963 mac 202020202020 65 00 00 00 rnda rndb, len of IR, IR
 	// this.hex2ba(hosts[index].macaddress), twenties, ['0x65', '0x00', '0x00', '0x00'], randomBitA, randomBitB, this.hex2ba(irLength), this.hex2ba(ir));
-	// 6864001f696332accf232a5f202020202020700000005e1b012900555555
-	SendMessage(strings.ToUpper("6864001e6463accfdeadbeef202020202020780000008dbc002a001e859c"), Devices[macAdd].IP)
-	// SendMessage("6864001f6463accfdeadbeef20202020202080000000d57530000000000000", Devices[macAdd].IP)
+	if macAdd == "ALL" {
+		for _, allones := range Devices {
+			if allones.DeviceType == ALLONE {
+				packet = "6864" + packetlen + "6963" + allones.MACAddress + twenties + "65000000" + rnda + rndb + irlen + IR
+				fmt.Println("==================================")
+				fmt.Println(packet)
+				fmt.Println("==================================")
+				SendMessage(packet, allones.IP)
+			}
+		}
+	} else {
+		if Devices[macAdd].DeviceType == ALLONE {
+			packet = "6864" + packetlen + "6963" + macAdd + twenties + "65000000" + rnda + rndb + irlen + IR
+			SendMessage(packet, Devices[macAdd].IP)
+		}
+	}
 }
 
 func EnterLearningMode(macAdd string) {
 	if macAdd == "ALL" {
 		for _, allones := range Devices {
-			SendMessage("686400186c73"+macAdd+twenties+"010000000000", allones.IP)
-			passMessage("irlearnmodeentering", *allones)
+			if allones.DeviceType == ALLONE {
+				SendMessage("686400186c73"+allones.MACAddress+twenties+"010000000000", allones.IP)
+				passMessage("irlearnmodeentering", *allones)
+			}
 		}
 	} else {
-		SendMessage("686400186c73"+macAdd+twenties+"010000000000", Devices[macAdd].IP)
-		passMessage("irlearnmodeentering", *Devices[macAdd])
+		if Devices[macAdd].DeviceType == ALLONE {
+			SendMessage("686400186c73"+macAdd+twenties+"010000000000", Devices[macAdd].IP)
+			passMessage("irlearnmodeentering", *Devices[macAdd])
+		}
 	}
 }
 
@@ -316,10 +341,12 @@ func handleMessage(message string, addr *net.UDPAddr) (bool, error) {
 		Devices[macAdd].LastMessage = message // Set our LastMessage
 		passMessage("buttonpress", *Devices[macAdd])
 	case "6c73":
-		Devices[macAdd].LastIRMessage = message[53:]
-		Devices[macAdd].LastMessage = message // Set our LastMessage
-		passMessage("ircode", *Devices[macAdd])
-
+		// 686400186c73accf232a5ffa202020202020000000000000
+		if len(message) >= 52 {
+			Devices[macAdd].LastIRMessage = message[52:]
+			Devices[macAdd].LastMessage = message // Set our LastMessage
+			passMessage("ircode", *Devices[macAdd])
+		}
 	default: // No message? Return true
 		return true, nil
 	}
