@@ -18,6 +18,6 @@ qg - 7167 - Search for socket where MAC is known
 rt - 7274 - Query response received (A.K.A Read Table command)
 rs -      - Reset command
 sf - 7366 - State change (via socket button press)
-tm - 746D
+tm - 746D - Table modify (change tables read by Read Table command)
 ul - 756C
 ur - 7572
