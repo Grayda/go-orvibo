@@ -13,11 +13,11 @@ To run the test, simply run `go run main.go` from the directory.
 To Do
 =====
 
- - [ ] Add in AllOne support (in progress)
+ - [x] Add in IR support (DONE!)
  - [ ] Add in set up feature as per https://stikonas.eu/gitweb/?p=s20.git;a=summary
- - [ ] Add in support for 433mhz with the AllOne
- - [ ] Support for Kepler and RF switches
- - [ ] Code cleanup
+ - [ ] Support for Kepler and RF switches (basic RF implemented, untested)
+ - [x] Code cleanup
+ - [ ] Add func examples to tests/main.go to show how to toggle state, learn IR etc.
 
 Contributing
 ============

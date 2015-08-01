@@ -1,10 +1,12 @@
 package main
 
 import (
-	"fmt"                         // For outputting messages
-	"github.com/Grayda/go-orvibo" // For controlling Orvibo stuff
-	//	"github.com/davecgh/go-spew/spew" // For neatly outputting stuff
+	"fmt" // For outputting messages
+
 	"time" // For setInterval()
+
+	"github.com/Grayda/go-orvibo"     // For controlling Orvibo stuff
+	"github.com/davecgh/go-spew/spew" // For neatly outputting stuff
 )
 
 func main() {
@@ -13,10 +15,9 @@ func main() {
 
 	ready, err := orvibo.Prepare() // You ready?
 	if ready == true {             // Yep! Let's do this!
-		// Because we'll never reach the end of the for loop (in theory),
-		// we run SendEvent here.
-
+		// Look for new devices every minute
 		autoDiscover = setInterval(orvibo.Discover, time.Minute)
+		// Resubscription should happen every 5 minutes, but we make it 3, just to be on the safe side
 		resubscribe = setInterval(orvibo.Subscribe, time.Minute*3)
 		orvibo.Discover() // Discover all sockets
 
@@ -24,43 +25,57 @@ func main() {
 			select { // This lets us do non-blocking channel reads. If we have a message, process it. If not, check for UDP data and loop
 			case msg := <-orvibo.Events:
 				switch msg.Name {
-				case "existingsocketfound":
+				case "ready": // We're set up and ready to go
+					fmt.Println("UDP connection ready")
+				case "discover": // We're discovering devices
+					fmt.Println("Discovering devices")
+				case "subscribe": // We're subscribing to all known devices
+					fmt.Println("Subscribing to devices")
+				case "query": // We're querying any unqueried devices
+					fmt.Println("Querying any unqueried devices")
+				case "stateset": // Raised by orvibo.SetState(). Let us know that we're attempting a state set
+					fmt.Println("Setting state to", msg.DeviceInfo.State)
+				case "irlearnmode": // Entering IR learning mode. I don't think there's an RF learning mode though.
+					fmt.Println("Entering learning mode for", msg.DeviceInfo.Name)
+				case "unknownhardwarefound": // We've found a device that follows the Orvibo "protocol", but we don't know what it is!
+					fmt.Println("Unknown hardware detected! Whole message is:", msg.DeviceInfo.LastMessage)
+				case "buttonpress": // Someone's pressed the button on top of our AllOne
+					fmt.Println("Button on", msg.DeviceInfo.Name, "has been pressed")
+				case "ircode": // We've learned an IR code, and this is what the code is
+					fmt.Println("IR code found!", msg.DeviceInfo.LastIRMessage)
+				case "existingsocketfound": // We've found a socket that we already know about. Can be used for resubscription purposes?
 					fallthrough
-				case "socketfound":
+				case "existingallonefound":
+					fallthrough
+				case "socketfound": // We've found a socket!
 					fmt.Println("Socket found! MAC address is", msg.DeviceInfo.MACAddress)
 					orvibo.Subscribe() // Subscribe to any unsubscribed sockets
 					orvibo.Query()     // And query any unqueried sockets
-				case "allonefound":
+				case "allonefound": // We've found an AllOne!
 					fmt.Println("AllOne found! MAC address is", msg.DeviceInfo.MACAddress)
 					orvibo.Subscribe() // Subscribe to any unsubscribed sockets
 					orvibo.Query()     // And query any unqueried sockets
-
-				case "subscribed":
+				case "subscribed": // We've subscribed to a device, and it's been successful
 					if msg.DeviceInfo.Subscribed == false {
-
 						fmt.Println("Subscription successful!")
-
 						orvibo.Devices[msg.DeviceInfo.MACAddress].Subscribed = true
 						orvibo.Query()
-						fmt.Println("Query called")
-
 					}
 					orvibo.Query()
-				case "queried":
-
+				case "queried": // We've successfully queried a device and can now access its reported name and so forth
 					if msg.DeviceInfo.Queried == false {
 						orvibo.Devices[msg.DeviceInfo.MACAddress].Queried = true
-						fmt.Println("Name of socket is:", msg.DeviceInfo.Name)
-						orvibo.EmitIR("00000000980000000000000000008800f6227e1134023302260229023e02260233023302260229023e02270233023402260230023602900627026006630286063f029006270290061c029d06c1020e06270290061c02a406370227021a024c02260229023e029006270229023d029106270229023e0227021a029e063f029006270290061b025002220290061b024d02260290061b020000", msg.DeviceInfo.MACAddress)
+						spew.Dump(msg.DeviceInfo)
 					}
-
-				case "statechanged":
-					fmt.Println("State changed to:", msg.DeviceInfo.State)
-				case "quit":
+				case "rfswitch": // Someone's toggled an RF switch. Still in alpha stage
+					fmt.Println("RF switch pressed")
+				case "statechanged": // Something external has triggered a state change, or we've got confirmation of a state change
+					fmt.Println("State of", msg.DeviceInfo.Name, "changed to:", msg.DeviceInfo.State)
+				case "quit": // Not used.
 					autoDiscover <- true
 					resubscribe <- true
 				}
-			default:
+			default: // No messages? Check for new messages
 				orvibo.CheckForMessages()
 			}
 
