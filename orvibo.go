@@ -218,25 +218,32 @@ func EmitIR(IR string, macAdd string) {
 	}
 }
 
-func EmitRF(RF string, macAdd string) {
+func EmitRF(state bool, RF string, macAdd string) {
+
+	var rfState string
+	if state == true {
+		rfState = "01"
+	} else {
+		rfState = "00"
+	}
 
 	rnda := fmt.Sprintf("%02s", strconv.FormatInt(int64(rand.Intn(255)), 16)) // Gets a number between 0 and 255, makes it into a hex string, then pads it with zeros
 	rndb := fmt.Sprintf("%02s", strconv.FormatInt(int64(rand.Intn(255)), 16)) // Gets a number between 0 and 255, makes it into a hex string, then pads it with zeros
-	var packet = "6864" + "0000" + "6463" + "accfdeadbeef" + twenties + "3ef5ee0b" + rnda + rndb + RF
+	var packet = "6864" + "0000" + "6463" + "accfdeadbeef" + twenties + "3ef5ee0b" + rnda + rndb + rfState + RF
 	var packetlen = fmt.Sprintf("%04s", strconv.FormatInt(int64(len(packet)/2), 16))
-
+	fmt.Println("========", packet)
 	// 6864 irlen 6963 mac 202020202020 65 00 00 00 rnda rndb, len of IR, IR
 	// this.hex2ba(hosts[index].macaddress), twenties, ['0x65', '0x00', '0x00', '0x00'], randomBitA, randomBitB, this.hex2ba(irLength), this.hex2ba(ir));
 	if macAdd == "ALL" {
 		for _, allones := range Devices {
 			if allones.DeviceType == ALLONE {
-				packet = "6864" + packetlen + "6463" + allones.MACAddress + twenties + "3ef5ee0b" + rnda + rndb + RF
+				packet = "6864" + packetlen + "6463" + allones.MACAddress + twenties + "3ef5ee0b" + rnda + rndb + rfState + RF
 				SendMessage(packet, allones)
 			}
 		}
 	} else {
 		if Devices[macAdd].DeviceType == ALLONE {
-			packet = "6864" + packetlen + "6463" + macAdd + twenties + "3ef5ee0b" + rnda + rndb + RF
+			packet = "6864" + packetlen + "6463" + macAdd + twenties + "3ef5ee0b" + rnda + rndb + rfState + RF
 			SendMessage(packet, Devices[macAdd])
 		}
 	}
@@ -392,6 +399,16 @@ func handleMessage(message string, addr *net.UDPAddr) (bool, error) {
 		passMessage("subscribed", Devices[macAdd])
 
 	case "6463": // Someone's pressed an RF switch.
+		var state bool
+		fmt.Println("Trying to parse the state of an RF switch. If this fails, please pass this info on to the developer!")
+		fmt.Println(message)
+		if message[48:50] == "00" {
+			state = false
+		} else {
+			state = true
+		}
+
+		Devices[macAdd].RFSwitches[message[36:42]] = RFSwitch{State: state}
 		passMessage("rfswitch", Devices[macAdd])
 
 	case "7274": // We've queried our socket, this is the data back

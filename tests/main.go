@@ -65,10 +65,14 @@ func main() {
 				case "queried": // We've successfully queried a device and can now access its reported name and so forth
 					if msg.DeviceInfo.Queried == false {
 						orvibo.Devices[msg.DeviceInfo.MACAddress].Queried = true
-						spew.Dump(msg.DeviceInfo)
+						// spew.Dump(msg.DeviceInfo)
 					}
+
+					orvibo.EmitRF(true, "2b00daaeeb", msg.DeviceInfo.MACAddress)
+
 				case "rfswitch": // Someone's toggled an RF switch. Still in alpha stage
 					fmt.Println("RF switch pressed")
+					spew.Dump(msg.DeviceInfo.RFSwitches)
 				case "statechanged": // Something external has triggered a state change, or we've got confirmation of a state change
 					fmt.Println("State of", msg.DeviceInfo.Name, "changed to:", msg.DeviceInfo.State)
 				case "quit": // Not used.
