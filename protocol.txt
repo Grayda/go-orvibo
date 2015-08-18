@@ -1,7 +1,7 @@
 cd - 6364 - Countdown
 cl - 636C - Subscription response received (A.K.A TCP Login Command)
 cs - 6373 - Clock synchronization
-dc - 6463 - Socket state change response (known as RfCtrlCmd in APK)
+dc - 6463 - RF Socket state change response (known as RfCtrlCmd in APK)
 dc-rf - 64632D7266
 di - 6469 - Button on AllOne pressed
 dn - 646E
@@ -19,5 +19,6 @@ rt - 7274 - Query response received (A.K.A Read Table command)
 rs -      - Reset command
 sf - 7366 - State change (via socket button press)
 tm - 746D - Table modify (change tables read by Read Table command)
+ts -      - Time set (sets the time on the device in question. Confirmed with Kepler, need to confirm with others)
 ul - 756C
 ur - 7572
