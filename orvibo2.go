@@ -2,8 +2,14 @@ package orvibo2
 
 import (
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"net"
+	"strconv"
 )
+
+// All exported events and vars are at the top, unexported events and vars at the bottom
+// -------------------------------------------------------------------------------------
 
 // EventStruct is our equivalent to node.js's Emitters, of sorts.
 // This basically passes back to our Event channel, info about what event was raised
@@ -30,7 +36,7 @@ type AllOne struct {
 	MACAddress    string              // The MAC Address of our item. Necessary for controlling the S10 / S20 / AllOne
 	Subscribed    bool                // Have we subscribed to this item yet? Doing so lets us control
 	Queried       bool                // Have we queried this item for it's name and details yet?
-	RFSwitches    map[string]RFSwitch // What switches are attached to this device?
+	RFSwitches    map[string]RFSwitch // What switches are attached to this device? RF switches aren't WiFi enabled, so they've all got to come through the AllOne anyway
 	LastIRMessage string              // Not yet implemented.
 	LastMessage   string              // The last message to come through for this device
 }
@@ -51,7 +57,7 @@ type Socket struct {
 type RFSwitch struct {
 	Name        string // The name of our item
 	DeviceType  int    // What type of device this is. See the const below for valid types
-	State       bool   // Is the item turned on or off? Will always be "false" for the AllOne, which doesn't do states, just IR & 433
+	State       bool   // I don't think the RF switches are "state aware". If they aren't, it's up to you to set this!
 	AllOne      AllOne // Which AllOne is this switch attached to?
 	LastMessage string // The last message to come through for this device
 }
@@ -64,15 +70,19 @@ type Kepler struct {
 	MACAddress string       // The MAC Address of our item. Necessary for controlling the S10 / S20 / AllOne
 	Subscribed bool         // Have we subscribed to this item yet? Doing so lets us control
 	Queried    bool         // Have we queried this item for it's name and details yet?
-	CO2        int          // The amount of CO2 in the air
-	Gas        int          // The amount of gas in the air
+	CO2        int          // The current amount of CO2 in the air
+	Gas        int          // The current amount of gas in the air
 }
 
-// All Orvibo packets start with this sequence, which is "hd" in hex
-var magicWord = "6864"
-
-// A list of devices we know about
+// Devices is a list of devices we know about. It's an interface, so it can be anything. Be careful with this, as things like Subscribe() won't work with an RFSwitch (as it has no MACAddress field)
 var Devices map[string]interface{}
+
+// Gas levels for reporting. Exportable so you can set 'em. I think these values are in PPM?
+// NOTE: These have NOT been tested. For your own health and safety: DO NOT RELY ON THESE VALUES!!
+var GasWarnLevel = 6     // Strange levels of gas, but not yet dangerous (?!)
+var GasDangerLevel = 50  // Dangerous levels of gas. HIDE YO KIDS, HIDE YO WIFE!
+var CO2WarnLevel = 100   // Unusual levels of C02 in the air, but not yet dangerous (?!)
+var CO2DangerLevel = 400 // HIDE YO HUSBAND, COZ THEY SUFFOCATING' ERRBODY OUT THERE!
 
 // Start listens on UDP port 10000 for incoming messages.
 func Start() error {
@@ -93,18 +103,64 @@ func Start() error {
 
 // Discover all Orvibo devices
 func Discover() {
-	// magicWord + packet length + command ID ("qa", which means search for sockets where MAC is unknown)
+	// magicWord + packet length + command ID (7161 = "qa", which means search for sockets where MAC is unknown)
 	err := broadcastMessage(magicWord + "0006" + "7161")
 	if err != nil {
 		return
 	}
 
-	passMessage("discover", &Device{})
+	passMessage("discover", &AllOne{})
 	return
 }
 
-// SendMessage is the heart of our library. Sends UDP messages to specified IP addresses
-func SendMessage(msg string, device interface{}) error {
+// Subscribe loops over all the Devices we know about, and asks for control (subscription)
+func Subscribe() {
+	for d := range Devices { // Loop over all devices we know about
+		if d.DeviceType != RF { // Obviously the RF switch isn't WiFi, so it has no MAC address, and therefore can't be subscribed to.
+			// We send a message to each socket. reverseMAC takes a MAC address and reverses each pair (e.g. AC CF 23 becomes CA FC 32)
+			sendMessage("636c", reverseMAC(Devices[d].MACAddress)+macPadding, Devices[d])
+			passMessage("subscribe", &d)
+		}
+	}
+
+	return
+}
+
+// EnterLearningMode lets us learn an IR code. We pass an interface{} because the Kepler, RFSwitch, AllOne and Socket structs have different fields
+func EnterLearningMode(device interface{}) error {
+	if device.DeviceType != AllOne { // We only want AllOne devices, as they're the only one capable of entering learning mode
+		return errors.New("Unable to enter learning mode. Device passed is not an AllOne")
+	}
+	if device.MACAddress == "ALL" { // If we've passed it an AllOne with
+		for _, a := range Devices {
+			if a.DeviceType == ALLONE {
+				sendMessage("6c73", "010000000000", a)
+				passMessage("irlearnmode", a)
+			}
+		}
+	} else {
+		if device.DeviceType == ALLONE {
+			sendMessage("6c73", "010000000000", device)
+			passMessage("irlearnmode", device)
+		}
+	}
+}
+
+// sendMessage pieces together a lot of the standard Orvibo packet, including correct packet length.
+// It ultimately uses sendMessageRaw to sent out the packet
+func sendMessage(commandID string, msg string, device interface{}) error {
+	if device.DeviceType == RF {
+		return errors.New("Cannot call SendMessage on an RF switch")
+	}
+
+	packet := magicWord + "0000" + commandID + device.MACAddress + macPadding + msg
+	packetlen := fmt.Sprintf("%04s", strconv.FormatInt(int64(len(packet)/2), 16))
+	packet = magicWord + packetLen + commandID + device.MACAddress + macPadding + msg
+	sendMessageRaw(packet, device)
+}
+
+// sendMessageRaw is the heart of our library. Sends UDP messages to specified IP addresses
+func sendMessageRaw(msg string, device interface{}) error {
 	// Turn this hex string into bytes for sending
 	buf, _ := hex.DecodeString(msg)
 
@@ -115,23 +171,21 @@ func SendMessage(msg string, device interface{}) error {
 	}
 
 	// Actually write the data and send it off
-	// _ lets us ignore "declared but not used" errors. If we replace _ with n (number of bytes),
-	// We'd have to use n somewhere (e.g. fmt.Println(n, "bytes received")), but _ lets us ignore that
 	_, err = conn.WriteToUDP(buf, udpAddr)
 	// If we've got an error
 	if err != nil {
 		return err
 	}
 
-	passMessage("sendmessage", device)
+	passMessage("sendMessageRaw", device)
 	return nil
 }
 
 // Sends a message to the whole network via UDP
-func broadcastMessage(msg string) error {
+func broadcastMessage(commandID, msg string) error {
 	udpAddr, err := net.ResolveUDPAddr("udp4", net.IPv4bcast.String()+":10000")
-	// We create a temporary AllOne with an IP address of 255.255.255.255 so SendMessage will work without modification
-	SendMessage(msg, &AllOne{IP: udpAddr})
+	// We create a temporary AllOne with an IP address of 255.255.255.255 so sendMessageRaw will work without modification
+	sendMessage(commandID, msg, &AllOne{IP: udpAddr})
 	if err != nil {
 		return err
 	}
@@ -140,3 +194,32 @@ func broadcastMessage(msg string) error {
 	passMessage("broadcast", &AllOne{})
 	return nil
 }
+
+// passMessage adds items to our Events channel so the calling code can be informed
+// It's non-blocking or whatever.
+func passMessage(message string, device interface{}) bool {
+
+	select {
+	case Events <- EventStruct{message, device}:
+
+	default:
+	}
+
+	return true
+}
+
+// Via http://stackoverflow.com/questions/19239449/how-do-i-reverse-an-array-in-go
+// Splits up a hex string into bytes then reverses the bytes
+func reverseMAC(mac string) string {
+	s, _ := hex.DecodeString(mac)
+	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
+		s[i], s[j] = s[j], s[i]
+	}
+	return hex.EncodeToString(s)
+}
+
+// All Orvibo packets start with this sequence, which is "hd" in hex
+var magicWord = "6864"
+
+// Every packet also includes the MAC address, plus padding. We put the padding in here for brevity
+var macPadding = "202020202020"
